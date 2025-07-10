@@ -16,6 +16,7 @@ def build_dataloader(
     class_balance: bool = False,
     seed: int | None = None,
     shuffle: bool = True,
+    collate_fn: callable = None,
     **kwargs,
 ):
     """Return a :obj:`~torch.utils.data.DataLoader` for :class:`MolGraphDataset`\s
@@ -45,8 +46,10 @@ def build_dataloader(
     else:
         sampler = None
 
-    if isinstance(dataset, MulticomponentDataset):
+    if isinstance(dataset, MulticomponentDataset) and collate_fn is None:
         collate_fn = collate_multicomponent
+    elif isinstance(dataset, MulticomponentDataset) and collate_fn is not None:
+        collate_fn = collate_fn
     else:
         collate_fn = collate_batch
 

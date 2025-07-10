@@ -4,6 +4,7 @@ from .collate import (
     TrainingBatch,
     collate_batch,
     collate_multicomponent,
+    collate_multicomponent_with_mask
 )
 from .dataloader import build_dataloader
 from .datapoints import MoleculeDatapoint, ReactionDatapoint
@@ -24,6 +25,7 @@ __all__ = [
     "collate_batch",
     "MulticomponentTrainingBatch",
     "collate_multicomponent",
+    "collate_multicomponent_with_mask",
     "build_dataloader",
     "MoleculeDatapoint",
     "ReactionDatapoint",

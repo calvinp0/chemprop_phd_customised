@@ -23,6 +23,8 @@ from chemprop.nn.metrics import (
 )
 from chemprop.nn.transforms import UnscaleTransform
 from chemprop.utils import ClassRegistry, Factory
+from chemprop.optimisers.optimisers import GradNormMixin
+
 
 __all__ = [
     "Predictor",
@@ -367,3 +369,143 @@ class SpectralFFN(_FFNPredictorBase):
         return Y / Y.sum(1, keepdim=True)
 
     train_step = forward
+
+
+@PredictorRegistry.register("multihead-regression")
+class MultiHeadRegressionFFN(GradNormMixin, nn.Module, HasHParams, HyperparametersMixin):
+    """
+    A multi-head regression predictor with a configurable number of targets.
+    
+    This predictor uses a shared trunk to process the input fingerprint, then
+    has separate output heads for each property. In Chemprop's conventions,
+    each property is treated as a separate task with one target (n_tasks=number of properties, n_targets=1).
+    """
+    _T_default_criterion = MSE
+    _T_default_metric = MSE
+
+    def __init__(
+        self,
+        n_tasks: int = 5,           # 5 tasks, one per property
+        n_targets: int = 1,         # 1 output per task
+        input_dim: int = DEFAULT_HIDDEN_DIM,
+        trunk_hidden_dim: int = 300,
+        trunk_layers: int = 1,
+        # Parameters for head configuration. These can be scalars or lists.
+        head_layers: int | list[int] = 1,
+        head_hidden_dim: int | list[int] = 128,
+        head_dropout: float | list[float] = 0.0,
+        head_activation: str | list[str] = "relu",
+        dropout: float = 0.0,
+        activation: str = "relu",
+        criterion: nn.Module | None = None,
+        task_weights: torch.Tensor | None = None,
+        threshold: float | None = None,
+        output_transform: UnscaleTransform | None = None,
+        grad_norm: bool = False,
+    ):
+
+        super().__init__()
+        self.grad_norm = grad_norm
+        if grad_norm:
+            GradNormMixin.__init__(self, n_tasks)
+
+        self.save_hyperparameters(ignore=["criterion", "output_transform"])
+        self.n_tasks = n_tasks  # number of tasks, which equals number of heads
+        self.n_targets = n_targets  # always 1 for each task in this design
+
+        # Build shared trunk from input_dim to trunk_hidden_dim.
+        self.shared_trunk = MLP.build(
+            input_dim=input_dim,
+            output_dim=trunk_hidden_dim,
+            hidden_dim=trunk_hidden_dim,
+            n_layers=trunk_layers,
+            dropout=dropout,
+            activation=activation,
+        )
+
+        # If scalar parameters are provided, convert them into lists of length n_tasks.
+        if isinstance(head_layers, int):
+            head_layers = [head_layers] * self.n_tasks
+        if isinstance(head_hidden_dim, int):
+            head_hidden_dim = [head_hidden_dim] * self.n_tasks
+        if isinstance(head_dropout, (int, float)):
+            head_dropout = [head_dropout] * self.n_tasks
+        if isinstance(head_activation, str):
+            head_activation = [head_activation] * self.n_tasks
+
+        # Build one head per task using the MLP builder.
+        self.heads = nn.ModuleList([
+            MLP.build(
+                input_dim=trunk_hidden_dim,
+                output_dim=1,
+                hidden_dim=head_hidden_dim[i],
+                n_layers=head_layers[i],
+                dropout=head_dropout[i],
+                activation=head_activation[i],
+            )
+            for i in range(self.n_tasks)
+        ])
+
+        if task_weights is None:
+            task_weights = torch.ones(n_tasks)
+        self.criterion = criterion or Factory.build(self._T_default_criterion, task_weights=task_weights, threshold=threshold)
+        self.output_transform = output_transform if output_transform is not None else nn.Identity()
+
+    def forward(self, Z: torch.Tensor) -> torch.Tensor:
+        # Compute shared representation.
+        shared_repr = self.shared_trunk(Z)
+        # Process with each head. Each head returns a tensor of shape [batch, 1].
+        outputs = [head(shared_repr) for head in self.heads]
+        # Concatenate outputs along dimension 1 to get [batch, n_tasks] i.e. [batch, 5].
+        out = torch.cat(outputs, dim=1)
+        # Do not unsqueeze here. Return shape [batch, 5] so that it matches other predictors.
+        return self.output_transform(out)
+
+    def train_step(self, Z: torch.Tensor, targets: torch.Tensor | None = None, shared_params: list | None = None) -> torch.Tensor:
+        if self.grad_norm and self.training:
+            return self.gradnorm_train_step(Z, targets, shared_params)
+        else:
+            return self.forward(Z)
+
+
+    def encode(self, Z: torch.Tensor, i: int) -> torch.Tensor:
+        return self.shared_trunk(Z)
+
+
+    def gradnorm_train_step(self, Z: torch.Tensor, targets: torch.Tensor, shared_params: list) -> torch.Tensor:
+        # 1. Forward pass.
+        preds = self.forward(Z)
+
+        # 2. Compute per-task losses.
+        task_losses = []
+        for i in range(self.n_tasks):
+            loss_i = F.mse_loss(preds[:, i], targets[:, i])
+            task_losses.append(loss_i)
+
+        # 3. Compute weighted task losses.
+        weighted_losses = [self.gradnorm_weights[i] * task_losses[i] for i in range(self.n_tasks)]
+        total_task_loss = sum(weighted_losses)
+
+        # 4. Compute gradient norms for each task using autograd.grad.
+        grad_norms = []
+        for i in range(self.n_tasks):
+            # Compute gradients of the weighted loss with respect to shared parameters.
+            grads = torch.autograd.grad(weighted_losses[i], shared_params, retain_graph=True, create_graph=True)
+            norm = sum([g.norm(2) for g in grads if g is not None])
+            grad_norms.append(norm)
+
+        # 5. Record initial task losses if not set.
+        if not hasattr(self, 'initial_task_losses'):
+            self.initial_task_losses = [loss.item() for loss in task_losses]
+
+        avg_grad_norm = sum(grad_norms) / self.n_tasks
+        gamma = 0.5  # Hyperparameter to tune.
+        r = torch.tensor([task_losses[i].item() / self.initial_task_losses[i] for i in range(self.n_tasks)], device=avg_grad_norm.device)
+        target_norms = [avg_grad_norm * (r_i ** gamma) for r_i in r]
+
+        # 6. Compute GradNorm loss.
+        gradnorm_loss = sum([abs(grad_norms[i] - target_norms[i]) for i in range(self.n_tasks)])
+
+        # 7. Total loss.
+        total_loss = total_task_loss + gradnorm_loss
+        return total_loss

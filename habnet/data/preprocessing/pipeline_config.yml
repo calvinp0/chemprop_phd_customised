@@ -1,0 +1,29 @@
+parse_and_order_reactions:
+  parse_input_csv: "/home/calvin/code/chemprop_phd_customised/habnet/data/extraction/processed/combined_data.csv"
+  parse_output_csv: "/home/calvin/code/chemprop_phd_customised/habnet/data/preprocessing/ordered_reactions_data/parsed_data.csv"
+  parse_converged_rxn_dirs:
+    - "/home/calvin/Dropbox/PersonalFolders/Calvin/ATLAS_Converged"
+    - "/home/calvin/Dropbox/PersonalFolders/Calvin/HAb_Converged"
+    - "/home/calvin/Dropbox/PersonalFolders/Calvin/ATLAS_Converged/NonRMG"
+    - "/home/calvin/Dropbox/PersonalFolders/Calvin/ZEUS_Converged"
+    - "/home/calvin/Dropbox/PersonalFolders/Calvin/Kfir_HAb_Converged"
+  parse_force: false
+  ordered_coords_save_path: "/home/calvin/code/chemprop_phd_customised/habnet/data/preprocessing/ordered_reactions_data/ordered_habstraction_coords.csv"
+  ordered_smiles_save_path: "/home/calvin/code/chemprop_phd_customised/habnet/data/preprocessing/ordered_reactions_data/ordered_habstraction_smiles.csv"
+  error_save_path: "/home/calvin/code/chemprop_phd_customised/habnet/data/preprocessing/ordered_reactions_data/order_habstraction_error.csv"
+  parsed_ordered: false
+
+connect_reactions:
+  ordered_coords_path: "/home/calvin/code/chemprop_phd_customised/habnet/data/preprocessing/ordered_reactions_data/ordered_habstraction_coords.csv"
+  reaction_data_path: "/home/calvin/code/arc_analysis/reaction_data.csv"
+  out_path_connections: "/home/calvin/code/chemprop_phd_customised/habnet/data/preprocessing/connect_reactions_data/connected_reactions.csv"
+  out_path_errors: "/home/calvin/code/chemprop_phd_customised/habnet/data/preprocessing/connect_reactions_data/error_connections.csv"
+
+create_sdf:
+  connections_file_path: "/home/calvin/code/chemprop_phd_customised/habnet/data/preprocessing/connect_reactions_data/connected_reactions.csv"
+  save_sdf_path: "/home/calvin/code/chemprop_phd_customised/habnet/data/processed/sdf_data"
+
+create_target:
+  path_to_sdfs: "/home/calvin/code/chemprop_phd_customised/habnet/data/processed/sdf_data"
+  target_data_path: "/home/calvin/code/chemprop_phd_customised/habnet/data/processed/target_data/target_data.csv"
+  target_errors_path: "/home/calvin/code/chemprop_phd_customised/habnet/data/processed/target_data/target_errors.csv"

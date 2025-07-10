@@ -55,6 +55,7 @@ from .predictors import (
     QuantileFFN,
     RegressionFFN,
     SpectralFFN,
+    MultiHeadRegressionFFN
 )
 from .transforms import GraphTransform, ScaleTransform, UnscaleTransform
 from .utils import Activation
@@ -108,6 +109,7 @@ __all__ = [
     "AtomMessagePassing",
     "BondMessagePassing",
     "MulticomponentMessagePassing",
+    "MultiHeadRegressionFFN",
     "Predictor",
     "PredictorRegistry",
     "QuantileFFN",

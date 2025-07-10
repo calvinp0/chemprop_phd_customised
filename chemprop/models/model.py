@@ -144,18 +144,20 @@ class MPNN(pl.LightningModule):
         return self.predictor(self.fingerprint(bmg, V_d, X_d))
 
     def training_step(self, batch: BatchType, batch_idx):
-        batch_size = self.get_batch_size(batch)
-        bmg, V_d, X_d, targets, weights, lt_mask, gt_mask = batch
+        # If the batch has 8 elements, assume the last element is the mask.
+        if len(batch) == 8:
+            bmg, V_d, X_d, targets, weights, lt_mask, gt_mask, mask = batch
+        else:
+            print("Batch has 7 elements")
+            bmg, V_d, X_d, targets, weights, lt_mask, gt_mask = batch
+            mask = targets.isfinite()
 
-        mask = targets.isfinite()
         targets = targets.nan_to_num(nan=0.0)
-
         Z = self.fingerprint(bmg, V_d, X_d)
-        preds = self.predictor.train_step(Z)
+        shared_params = list(self.message_passing.parameters())
+        preds = self.predictor.train_step(Z, targets, shared_params=shared_params)
         l = self.criterion(preds, targets, mask, weights, lt_mask, gt_mask)
-
-        self.log("train_loss", self.criterion, batch_size=batch_size, prog_bar=True, on_epoch=True)
-
+        self.log("train_loss", l, batch_size=self.get_batch_size(batch), prog_bar=True, on_epoch=True)
         return l
 
     def on_validation_model_eval(self) -> None:
@@ -169,9 +171,14 @@ class MPNN(pl.LightningModule):
         self._evaluate_batch(batch, "val")
 
         batch_size = self.get_batch_size(batch)
-        bmg, V_d, X_d, targets, weights, lt_mask, gt_mask = batch
 
-        mask = targets.isfinite()
+        if len(batch) == 8:
+            bmg, V_d, X_d, targets, weights, lt_mask, gt_mask, mask = batch
+        else:
+            print("Batch has 7 elements")
+            bmg, V_d, X_d, targets, weights, lt_mask, gt_mask = batch
+            mask = targets.isfinite()
+        
         targets = targets.nan_to_num(nan=0.0)
 
         Z = self.fingerprint(bmg, V_d, X_d)
@@ -184,9 +191,13 @@ class MPNN(pl.LightningModule):
 
     def _evaluate_batch(self, batch: BatchType, label: str) -> None:
         batch_size = self.get_batch_size(batch)
-        bmg, V_d, X_d, targets, weights, lt_mask, gt_mask = batch
 
-        mask = targets.isfinite()
+        if len(batch) == 8:
+            bmg, V_d, X_d, targets, weights, lt_mask, gt_mask, mask = batch
+        else:
+            print("Batch has 7 elements")
+            bmg, V_d, X_d, targets, weights, lt_mask, gt_mask = batch
+            mask = targets.isfinite()
         targets = targets.nan_to_num(nan=0.0)
         preds = self(bmg, V_d, X_d)
         weights = torch.ones_like(weights)

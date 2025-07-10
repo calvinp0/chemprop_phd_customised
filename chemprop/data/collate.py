@@ -118,3 +118,35 @@ def collate_multicomponent(batches: Iterable[Iterable[Datum]]) -> Multicomponent
         tbs[0].lt_mask,
         tbs[0].gt_mask,
     )
+
+class MulticomponentTrainingBatchMask(NamedTuple):
+    bmgs: list[BatchMolGraph]
+    V_ds: list[Tensor | None]
+    X_d: Tensor | None
+    Y: Tensor | None
+    w: Tensor
+    lt_mask: Tensor | None
+    gt_mask: Tensor | None
+    mask: Tensor | None
+
+def collate_multicomponent_with_mask(batches: Iterable[Iterable[Datum]]) -> MulticomponentTrainingBatchMask:
+    tbs = [collate_batch(batch) for batch in zip(*batches)]
+
+    # Assume that tbs[0].Y contains teh target values as a tensor shape [batch, n_tasks]
+    Y = tbs[0].Y
+    mask = None
+    if Y is not None:
+        mask = torch.ones_like(Y, dtype=torch.bool)
+        # For the dihedral tasks (Assume target 4 and 5, columns 3 and 4) mark as False if the target is -10
+        mask[:, 3] = Y[:, 3] != -10
+
+    return MulticomponentTrainingBatchMask(
+        [tb.bmg for tb in tbs],
+        [tb.V_d for tb in tbs],
+        tbs[0].X_d,
+        tbs[0].Y,
+        tbs[0].w,
+        tbs[0].lt_mask,
+        tbs[0].gt_mask,
+        mask,
+    )
